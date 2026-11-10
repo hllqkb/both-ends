@@ -217,7 +217,7 @@ const scenes = {
   figures: {
     update(dt) { state.t += dt; },
     draw() {
-      drawSky(); drawRoad(false);
+      drawSky(); shade(0.5); drawRoad(false);
       text('这个游戏里的每个形象', W / 2, 70, 34, C.paper);
       const fake = { face: 1, moving: false, runPhase: 0, dashT: 0, stunT: 0, energy: 100, t: state.t };
       drawPlayer(140, 330, fake); text('我', 140, 366, 26, C.paper);
@@ -360,8 +360,9 @@ function rr(x, y, w, h, r) { // a rounded box's path
 function line(x0, y0, x1, y1) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); }
 function shade(a) { ctx.fillStyle = `rgba(11,14,28,${a})`; ctx.fillRect(0, 0, W, H); }
 const STARS = (() => { // decoration only: its own small generator, so play's chance is untouched
-  const out = []; let v = 12345;
-  for (let i = 0; i < 70; i++) { v = (v * 1103515245 + 12345) & 0x7fffffff; const x = v % W; v = (v * 1103515245 + 12345) & 0x7fffffff; out.push([x, v % 330, 1 + (v % 3) * 0.5]); }
+  const out = []; let v = 2463534242;
+  const next = () => { v ^= v << 13; v >>>= 0; v ^= v >>> 17; v ^= v << 5; v >>>= 0; return v / 4294967296; }; // xorshift32
+  for (let i = 0; i < 80; i++) out.push([Math.floor(next() * W), Math.floor(next() * 340), 1 + Math.floor(next() * 3) * 0.5]);
   return out;
 })();
 function drawSky() {
@@ -380,7 +381,7 @@ function drawSky() {
   }
   ctx.fillStyle = '#2a2238'; ctx.fillRect(404, GROUND - 90, 14, 90);
   ctx.fillStyle = '#31405a';
-  ctx.beginPath(); ctx.arc(411, GROUND - 120, 52, 0, 7); ctx.arc(372, GROUND - 92, 36, 0, 7); ctx.arc(452, GROUND - 96, 38, 0, 7); ctx.fill();
+  for (const c of [[411, 120, 52], [372, 92, 36], [452, 96, 38]]) { ctx.beginPath(); ctx.arc(c[0], GROUND - c[1], c[2], 0, 7); ctx.fill(); }
   // the work end: an office tower with cool windows
   ctx.fillStyle = '#1c3443'; ctx.fillRect(930, GROUND - 400, 290, 400);
   ctx.fillStyle = '#24465a'; ctx.fillRect(1040, GROUND - 440, 70, 40);

@@ -1,0 +1,30 @@
+browser	/usr/bin/google-chrome
+time	2026-11-10 06:58:41
+render	cheap
+ua	HeadlessChrome/156.0.0.0
+scene	0	title
+state	0	title	{"t":0,"score":0,"gained":"","best":0,"newBest":false,"won":false,"cause":"","ending":"","sem":0,"semT":0,"phase":"fall","study":100,"work":100,"energy":100,"combo":0,"mult":1,"px":640,"face":1,"movin
+scene	1	play
+state	1	play	{"t":0,"score":0,"gained":"","best":0,"newBest":false,"won":false,"cause":"","ending":"","sem":0,"semT":0,"phase":"fall","study":100,"work":100,"energy":100,"combo":0,"mult":1,"px":640,"face":1,"movin
+playinput	124	ArrowLeft
+state	870	play	{"t":14.48,"score":30,"gained":"","best":0,"newBest":false,"won":false,"cause":"","ending":"","sem":0,"semT":14.48,"phase":"fall","study":52,"work":100,"energy":91.77,"combo":0,"mult":1,"px":44,"face"
+digits	log	24px "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif	tabular	0
+digits	log	26px "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif	tabular	0
+loop	log	none	no loop() step was marked
+first	log	none	no state.beat
+pressure	none	the game set no number state.margin in play
+steptime	870	0.006	1.300
+frametime	14	2.0	5.6	60	0	0
+done	870	play	stop	14.5	206
+measured	1280x720
+text	play	canvas	63,684,157,708	36.0	9.02	inside	学校这头
+text	play	canvas	1123,684,1217,708	36.0	9.02	inside	公司这头
+text	play	canvas	329,577,432,603	37.5	6.37	inside	作业没交
+text	play	canvas	37,28,83,52	36.0	8.69	inside	学业
+text	play	canvas	1053,28,1228,52	36.0	8.43	inside	实习（还没开始）
+text	play	canvas	37,72,116,96	36.0	14.26	inside	分数 30
+text	play	canvas	1165,72,1244,96	36.0	8.25	inside	最高 30
+text	play	canvas	585,76,696,102	36.0	14.24	inside	1/5 大一上
+screen	870	play	c34796d5	drawn
+uncaught	0
+shot	/home/runner/work/both-ends/both-ends/prototypes/both-ends/evidence/play-long.png	55169
