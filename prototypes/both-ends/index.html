@@ -1,0 +1,565 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: 学校和实习两头都要接住、精力还一直在烧，这种顾此失彼的取舍能不能撑起两分钟的一局？ -->
+<!-- Date: 2026-11-10 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>两头烧</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0e1c; overflow: hidden; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script src="config.js"></script>
+<script>
+'use strict';
+// Built on the one-shot's starter: the fixed step, the clock hook, window.game and the play and
+// figures scenes are the starter's. Everything else is this game.
+
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
+const W = 1280, H = 720;        // logical size
+const PIXEL = false;
+const FONT = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Source Han Sans SC",sans-serif';
+const TITLE = '两头烧';
+const CONTROLS = ['左右方向键或 A D：左右跑', '空格：冲刺一下（费精力）', 'P：暂停　　M：静音', '手机：按住屏幕，人往手指那边跑；双击冲刺'];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never the built-in one
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events: anything the game wants a run to see
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+function fit() { // fills the window at any size and pixel ratio
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  canvas.style.imageRendering = PIXEL ? 'pixelated' : 'auto';
+  ctx.setTransform(r, 0, 0, r, 0, 0); ctx.imageSmoothingEnabled = !PIXEL;
+}
+addEventListener('resize', fit); fit();
+function clear(c) { ctx.fillStyle = c; ctx.fillRect(0, 0, W, H); }
+function text(s, x, y, size, c, align = 'center') {
+  ctx.fillStyle = c; ctx.font = `${size}px ${FONT}`; ctx.textAlign = align;
+  ctx.textBaseline = 'middle'; ctx.fillText(s, x, y);
+}
+
+// ---- Input: keys by position (event.code), OS key repeat ignored; a finger or mouse too ---
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code); // true for one step after the key goes down
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+const pointer = { down: false, x: W / 2 };
+let tapHit = false, wantPause = false; // read on the step, cleared after it
+function pointerX(e) { const r = canvas.getBoundingClientRect(); return r.width ? (e.clientX - r.left) / r.width * W : W / 2; }
+canvas.addEventListener('pointerdown', e => { startAudio(); pointer.down = true; pointer.x = pointerX(e); tapHit = true; e.preventDefault(); });
+addEventListener('pointermove', e => { if (pointer.down) pointer.x = pointerX(e); });
+addEventListener('pointerup', () => { pointer.down = false; });
+addEventListener('pointercancel', () => { pointer.down = false; });
+addEventListener('blur', () => { down.clear(); pointer.down = false; wantPause = true; });
+
+// ---- Audio: started on first input, mute on M --------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)(); // a check may inject one
+    const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+    out.connect(ac.destination); audio = { ac, out };
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'square', vol = 0.3) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur);
+}
+
+// ---- The game: what it knows ---------------------------------------------------------------
+const C = {
+  sky1: '#11162a', sky2: '#27305a', paper: '#f3e9d2', amber: '#f2a65a', teal: '#4fc4b8',
+  red: '#ef5a5f', candle: '#ffd66b', ink: '#1b2238', road: '#cfc3a8', dim: '#aab3d0',
+};
+const GROUND = 620; // y of the road's edge: feet stand here, drops land here
+const BEST_KEY = 'both-ends.best';
+const SEMS = [
+  { name: '大一上', line: '只有学校', hint: '接住作业本，抽空接枕头，别让蜡烛烧完' },
+  { name: '大一下', line: '第一份实习', hint: '右边开始掉工单，两头都要接' },
+  { name: '大二上', line: '第二份实习，还有比赛', hint: '奖杯要接，手机要躲' },
+  { name: '大二下', line: '线上会出事', hint: '红色告警掉得最快，漏了最疼' },
+  { name: '大三上', line: '第三份实习', hint: '接不完的，选一头' },
+];
+const ENDINGS = {
+  school: '你回了学校。早八还是起不来，但晚上的时间是自己的。',
+  work: '你续签了。工单还在掉，不过你已经知道先接哪一个。',
+};
+const CAUSES = {
+  study: '学业条见底：挂科了',
+  work: '实习条见底：实习没保住',
+  energy: '蜡烛烧完了：你睡了整整两天',
+};
+const DOORS = [
+  { id: 'school', x: 170, label: '回学校', color: C.amber },
+  { id: 'work', x: 1110, label: '续签', color: C.teal },
+];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function readBest() { try { return Number(localStorage.getItem(BEST_KEY)) || 0; } catch (e) { return 0; } }
+function writeBest(v) { try { localStorage.setItem(BEST_KEY, String(v)); } catch (e) { /* private mode: the best lasts this visit */ } }
+
+// ---- Scenes ---------------------------------------------------------------------------------
+let scene, state;
+function reset() {
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  state = {
+    t: 0, score: 0, gained: '', best: readBest(), newBest: false, won: false, cause: '', ending: '',
+    sem: 0, semT: 0, phase: 'fall', // fall: things drop. doors: the last semester is over, pick a door
+    study: 100, work: 100, energy: 100, combo: 0, mult: 1,
+    px: W / 2, face: 1, moving: false, runPhase: 0, dashT: 0, dashCd: 0, stunT: 0, lastTap: -10,
+    items: [], pops: [], spawnT: 1.2, pillowT: 6, bannerT: 3.2, endT: 0,
+    caught: 0, missed: 0,
+  };
+}
+function gap() { return Math.max(tune.spawn_gap_floor, tune.spawn_gap_start - tune.spawn_gap_shrink * state.sem); }
+function fallSpeed() { return tune.fall_speed_start + tune.fall_speed_gain * state.sem; }
+function pickKind() {
+  const s = state.sem;
+  if (s === 0) return 'hw';
+  const r = rng(); let a = 0;
+  if (s >= 2) {
+    a += tune.trophy_share; if (r < a) return 'trophy';
+    a += tune.phone_share; if (r < a) return 'phone';
+  }
+  if (s >= 3) { a += tune.alert_share * (s >= 4 ? 1.5 : 1); if (r < a) return 'alert'; }
+  return rng() < 0.5 ? 'hw' : 'ticket';
+}
+function spawn(kind) {
+  let x, v = fallSpeed();
+  if (kind === 'hw') x = 60 + rng() * (W * 0.56 - 60);                 // the school half, a little past the middle
+  else if (kind === 'ticket') x = W * 0.44 + rng() * (W * 0.56 - 60);  // the work half
+  else if (kind === 'alert') { x = W * 0.4 + rng() * (W * 0.6 - 60); v *= tune.alert_speed; tone(880, 0.12, 'square', 0.25); }
+  else if (kind === 'phone') x = clamp(state.px + (rng() - 0.5) * 420, 60, W - 60); // it comes looking for you
+  else if (kind === 'trophy') { x = 60 + rng() * (W - 120); v *= 1.15; }
+  else { x = W * 0.28 + rng() * W * 0.44; v *= tune.pillow_speed; }     // pillow: near the middle, drifting
+  state.items.push({ kind, x, y: -40, v, tilt: (rng() - 0.5) * 0.5 });
+}
+function pop(x, y, s, c) { state.pops.push({ x, y, s, c, t: 0 }); }
+function addCombo() {
+  state.combo++; state.caught++;
+  state.mult = Math.min(tune.mult_max, 1 + Math.floor(state.combo / tune.combo_step));
+}
+function breakCombo() { state.combo = 0; state.mult = 1; }
+function onCatch(it) {
+  const s = state, y = GROUND - 150;
+  if (it.kind === 'hw' || it.kind === 'ticket') {
+    addCombo(); const p = tune.points_catch * s.mult; s.score += p;
+    if (it.kind === 'hw') s.study = Math.min(100, s.study + tune.catch_gain);
+    else s.work = Math.min(100, s.work + tune.catch_gain);
+    pop(it.x, y, '+' + p, it.kind === 'hw' ? C.amber : C.teal); tone(it.kind === 'hw' ? 660 : 784, 0.08, 'triangle');
+  } else if (it.kind === 'alert') {
+    addCombo(); const p = tune.points_alert * s.mult; s.score += p;
+    pop(it.x, y, '告警处理 +' + p, C.red); tone(988, 0.1, 'triangle'); tone(1319, 0.14, 'triangle');
+  } else if (it.kind === 'trophy') {
+    addCombo(); const p = tune.points_trophy * s.mult; s.score += p;
+    s.study = Math.min(100, s.study + tune.trophy_gain); s.work = Math.min(100, s.work + tune.trophy_gain);
+    pop(it.x, y, '拿奖 +' + p, C.candle); tone(784, 0.1, 'triangle'); tone(1175, 0.2, 'triangle');
+  } else if (it.kind === 'pillow') {
+    s.energy = Math.min(100, s.energy + tune.pillow_gain);
+    pop(it.x, y, '睡了一觉', C.paper); tone(392, 0.25, 'sine');
+  } else { // phone
+    s.stunT = tune.phone_stun; s.energy = Math.max(0, s.energy - tune.phone_drain); breakCombo();
+    pop(it.x, y, '刷了一会儿手机', '#d9a8ff'); tone(220, 0.3, 'sawtooth', 0.2);
+  }
+}
+function onMiss(it) {
+  const s = state;
+  if (it.kind === 'hw') { s.study -= tune.miss_loss; pop(it.x, GROUND - 30, '作业没交', C.amber); }
+  else if (it.kind === 'ticket') { s.work -= tune.miss_loss; pop(it.x, GROUND - 30, '工单超时', C.teal); }
+  else if (it.kind === 'alert') { s.work -= tune.alert_loss; pop(it.x, GROUND - 30, '线上出事了', C.red); }
+  else return; // a trophy, a pillow or a phone that lands costs nothing
+  s.missed++; breakCombo(); tone(150, 0.18, 'sawtooth', 0.22);
+}
+function finish(won, why) {
+  const s = state;
+  s.won = won; s.endT = 0;
+  if (won) { s.ending = why; s.gained = ENDINGS[why]; s.score += Math.round(s.study + s.work + s.energy); }
+  else { s.cause = why; s.gained = CAUSES[why]; }
+  if (s.score > s.best) { s.best = s.score; s.newBest = true; writeBest(s.best); }
+  events.push({ kind: won ? 'won' : 'lost', why, score: s.score });
+  scene = won ? 'results' : 'over';
+  if (won) { tone(523, 0.15, 'triangle'); tone(784, 0.3, 'triangle'); } else tone(110, 0.5, 'sawtooth', 0.25);
+}
+
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() {
+      drawSky(); drawRoad(false);
+      text('这个游戏里的每个形象', W / 2, 70, 34, C.paper);
+      const fake = { face: 1, moving: false, runPhase: 0, dashT: 0, stunT: 0, energy: 100, t: state.t };
+      drawPlayer(140, 330, fake); text('我', 140, 366, 26, C.paper);
+      const names = { hw: '作业本', ticket: '工单', alert: '告警铃', trophy: '奖杯', pillow: '枕头', phone: '手机' };
+      Object.keys(names).forEach((k, i) => {
+        const x = 330 + i * 160;
+        ctx.save(); ctx.translate(x, 250); ctx.scale(1.6, 1.6); ITEM_DRAW[k](state.t); ctx.restore();
+        text(names[k], x, 330, 26, C.paper);
+      });
+      DOORS.forEach((d, i) => { drawDoor(480 + i * 320, GROUND, d, true); });
+    },
+  },
+  title: {
+    update(dt) {
+      state.t += dt;
+      if (pressed('Enter') || pressed('Space') || tapHit) { reset(); scene = 'play'; }
+    },
+    draw() {
+      drawSky(); shade(0.45); drawRoad(false);
+      drawCandle(W / 2, 92, 100, state.t, 460);
+      text(TITLE, W / 2, 168, 76, C.paper);
+      text('从大一就开始实习是什么感觉：左边掉作业，右边掉工单，蜡烛两头烧', W / 2, 232, 26, C.dim);
+      CONTROLS.forEach((c, i) => text(c, W / 2, 296 + i * 38, 24, C.paper));
+      const legend = [['hw', '作业本：接'], ['ticket', '工单：接'], ['alert', '告警：快接'], ['trophy', '奖杯：接'], ['pillow', '枕头：回精力'], ['phone', '手机：躲开']];
+      legend.forEach((l, i) => {
+        const x = 190 + i * 180;
+        ctx.save(); ctx.translate(x, 500); ITEM_DRAW[l[0]](state.t); ctx.restore();
+        text(l[1], x, 552, 22, C.paper);
+      });
+      if (state.best > 0) text('最高分 ' + state.best, W / 2, 606, 24, C.candle);
+      text('按回车开始，或者点一下屏幕', W / 2, 660, 30, C.ink);
+    },
+  },
+  play: {
+    update(dt) {
+      if (pressed('KeyP') || pressed('Escape') || wantPause) { scene = 'pause'; return; }
+      const s = state; s.t += dt;
+      // the player
+      let dir = 0;
+      if (down.has('ArrowLeft') || down.has('KeyA')) dir -= 1;
+      if (down.has('ArrowRight') || down.has('KeyD')) dir += 1;
+      if (dir === 0 && pointer.down) { const dx = pointer.x - s.px; if (Math.abs(dx) > 10) dir = Math.sign(dx); }
+      let dashAsk = pressed('Space');
+      if (tapHit) { if (s.t - s.lastTap < 0.3) dashAsk = true; s.lastTap = s.t; }
+      s.dashCd = Math.max(0, s.dashCd - dt); s.dashT = Math.max(0, s.dashT - dt); s.stunT = Math.max(0, s.stunT - dt);
+      if (dashAsk && s.dashCd <= 0 && s.stunT <= 0 && s.energy > tune.dash_cost) {
+        s.dashT = tune.dash_time; s.dashCd = tune.dash_cooldown;
+        if (s.phase === 'fall') s.energy -= tune.dash_cost;
+        tone(520, 0.06, 'square', 0.15);
+      }
+      if (s.stunT > 0) dir = 0;
+      const speed = tune.run_speed * (s.energy < tune.tired_below ? tune.tired_factor : 1) * (s.dashT > 0 ? tune.dash_boost : 1);
+      s.moving = dir !== 0;
+      if (dir) { s.face = dir; s.px = clamp(s.px + dir * speed * dt, 44, W - 44); s.runPhase += dt * speed / 36; }
+      // popups and the banner
+      for (const p of s.pops) { p.t += dt; p.y -= 46 * dt; }
+      s.pops = s.pops.filter(p => p.t < 0.9);
+      s.bannerT = Math.max(0, s.bannerT - dt);
+
+      if (s.phase === 'doors') {
+        for (const d of DOORS) if (Math.abs(s.px - d.x) < 46) { finish(true, d.id); return; }
+        return;
+      }
+      // the candle
+      s.energy -= tune.energy_drain * dt;
+      if (s.energy <= 0) { s.energy = 0; finish(false, 'energy'); return; }
+      // the semester
+      s.semT += dt;
+      if (s.semT >= tune.semester_seconds) {
+        s.semT = 0;
+        if (s.sem >= SEMS.length - 1) { // the last one is over: no more drops, two doors
+          s.phase = 'doors'; s.items = []; s.bannerT = 6; s.stunT = 0;
+          tone(659, 0.2, 'triangle'); return;
+        }
+        s.sem++; s.bannerT = 3.2; tone(523, 0.12, 'triangle'); tone(659, 0.18, 'triangle');
+      }
+      // drops
+      s.spawnT -= dt;
+      if (s.spawnT <= 0) { spawn(pickKind()); s.spawnT += gap(); }
+      s.pillowT -= dt;
+      if (s.pillowT <= 0) { spawn('pillow'); s.pillowT += tune.pillow_gap; }
+      const top = GROUND - 140, low = GROUND - 30; // the laptop held overhead catches between these
+      for (const it of s.items) {
+        it.y += it.v * dt;
+        const half = it.kind === 'phone' ? tune.phone_half : tune.catch_half;
+        if (!it.done && it.y + 20 >= top && it.y <= low && Math.abs(it.x - s.px) <= half) { it.done = true; onCatch(it); }
+        else if (!it.done && it.y >= GROUND - 6) { it.done = true; onMiss(it); }
+      }
+      s.items = s.items.filter(it => !it.done);
+      if (s.study <= 0) { s.study = 0; finish(false, 'study'); return; }
+      if (s.work <= 0) { s.work = 0; finish(false, 'work'); return; }
+    },
+    draw() { drawWorld(true); },
+  },
+  pause: {
+    update() { wantPause = false; if (pressed('KeyP') || pressed('Escape') || pressed('Enter') || tapHit) scene = 'play'; },
+    draw() {
+      drawWorld(false); shade(0.6);
+      text('暂停', W / 2, H / 2 - 30, 56, C.paper);
+      text('按 P 或点一下屏幕继续', W / 2, H / 2 + 36, 28, C.dim);
+    },
+  },
+  over: {
+    update(dt) {
+      state.endT += dt;
+      if (pressed('KeyR') || pressed('Enter') || (tapHit && state.endT > 0.6)) { reset(); scene = 'play'; }
+    },
+    draw() {
+      drawWorld(false); shade(0.72);
+      text(state.gained || '这一局结束了', W / 2, 250, 46, C.paper);
+      text('撑到了 ' + SEMS[state.sem].name + ' · ' + SEMS[state.sem].line, W / 2, 322, 28, C.dim);
+      text('分数 ' + state.score, W / 2, 392, 40, C.candle);
+      text(state.newBest ? '新纪录' : '最高分 ' + state.best, W / 2, 446, 26, state.newBest ? C.candle : C.dim);
+      text('按 R 或回车，从大一上重来', W / 2, 530, 30, C.paper);
+    },
+  },
+  results: {
+    update(dt) {
+      state.endT += dt;
+      if (pressed('Enter') || pressed('KeyR') || (tapHit && state.endT > 0.6)) { reset(); scene = 'play'; }
+    },
+    draw() {
+      drawWorld(false); shade(0.72);
+      text('大三上过完了', W / 2, 210, 30, C.dim);
+      text(state.gained || '通关', W / 2, 280, 36, C.paper);
+      text('分数 ' + state.score, W / 2, 372, 44, C.candle);
+      text(state.newBest ? '新纪录' : '最高分 ' + state.best, W / 2, 428, 26, state.newBest ? C.candle : C.dim);
+      text('接住 ' + state.caught + ' 个，漏掉 ' + state.missed + ' 个', W / 2, 474, 24, C.dim);
+      text('按回车再来一局，试试另一扇门', W / 2, 550, 30, C.paper);
+    },
+  },
+};
+
+// ---- Drawing: every figure is drawn here, in the brief's look ------------------------------
+function rr(x, y, w, h, r) { // a rounded box's path
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+function line(x0, y0, x1, y1) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); }
+function shade(a) { ctx.fillStyle = `rgba(11,14,28,${a})`; ctx.fillRect(0, 0, W, H); }
+const STARS = (() => { // decoration only: its own small generator, so play's chance is untouched
+  const out = []; let v = 12345;
+  for (let i = 0; i < 70; i++) { v = (v * 1103515245 + 12345) & 0x7fffffff; const x = v % W; v = (v * 1103515245 + 12345) & 0x7fffffff; out.push([x, v % 330, 1 + (v % 3) * 0.5]); }
+  return out;
+})();
+function drawSky() {
+  const g = ctx.createLinearGradient(0, 0, 0, GROUND);
+  g.addColorStop(0, C.sky1); g.addColorStop(1, C.sky2);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(243,233,210,0.55)';
+  for (const st of STARS) ctx.fillRect(st[0], st[1], st[2], st[2]);
+  // the school end: a dorm block with warm windows, and a tree
+  ctx.fillStyle = '#3b2f45'; ctx.fillRect(40, GROUND - 250, 300, 250);
+  ctx.fillStyle = '#4a3a50'; ctx.fillRect(28, GROUND - 262, 324, 14);
+  for (let j = 0; j < 5; j++) for (let i = 0; i < 6; i++) {
+    const lit = ((i * 7 + j * 13) % 5) < 3;
+    ctx.fillStyle = lit ? 'rgba(242,166,90,0.85)' : 'rgba(242,166,90,0.16)';
+    ctx.fillRect(62 + i * 46, GROUND - 232 + j * 44, 26, 28);
+  }
+  ctx.fillStyle = '#2a2238'; ctx.fillRect(404, GROUND - 90, 14, 90);
+  ctx.fillStyle = '#31405a';
+  ctx.beginPath(); ctx.arc(411, GROUND - 120, 52, 0, 7); ctx.arc(372, GROUND - 92, 36, 0, 7); ctx.arc(452, GROUND - 96, 38, 0, 7); ctx.fill();
+  // the work end: an office tower with cool windows
+  ctx.fillStyle = '#1c3443'; ctx.fillRect(930, GROUND - 400, 290, 400);
+  ctx.fillStyle = '#24465a'; ctx.fillRect(1040, GROUND - 440, 70, 40);
+  for (let j = 0; j < 9; j++) for (let i = 0; i < 7; i++) {
+    const lit = ((i * 5 + j * 11) % 7) < 4;
+    ctx.fillStyle = lit ? 'rgba(79,196,184,0.8)' : 'rgba(79,196,184,0.14)';
+    ctx.fillRect(948 + i * 38, GROUND - 382 + j * 41, 26, 24);
+  }
+  ctx.fillStyle = '#18283a'; ctx.fillRect(820, GROUND - 180, 90, 180);
+  for (let j = 0; j < 4; j++) for (let i = 0; i < 2; i++) {
+    ctx.fillStyle = ((i + j) % 2) ? 'rgba(79,196,184,0.6)' : 'rgba(79,196,184,0.14)';
+    ctx.fillRect(834 + i * 36, GROUND - 164 + j * 40, 24, 24);
+  }
+}
+function drawRoad(labels) {
+  ctx.fillStyle = C.road; ctx.fillRect(0, GROUND, W, H - GROUND);
+  ctx.fillStyle = '#b3a78c'; ctx.fillRect(0, GROUND, W, 6);
+  ctx.fillStyle = '#e9dfc6';
+  for (let x = 30; x < W; x += 120) ctx.fillRect(x, GROUND + 46, 60, 6);
+  if (labels) { text('学校这头', 110, GROUND + 76, 24, C.ink); text('公司这头', W - 110, GROUND + 76, 24, C.ink); }
+}
+function flame(x, y, dir, t, k) { // a teardrop on the candle's end, leaning outward
+  const fl = 1 + 0.14 * Math.sin(t * 17 + x * 0.05);
+  const shape = (s, c) => {
+    ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x - dir * 2, y + 7 * s);
+    ctx.bezierCurveTo(x + dir * 15 * s, y + 8 * s, x + dir * 19 * s, y - 8 * s, x + dir * 9 * s, y - 26 * s * fl);
+    ctx.bezierCurveTo(x + dir * 3 * s, y - 12 * s, x - dir * 7 * s, y - 5 * s, x - dir * 2, y + 7 * s); ctx.fill();
+  };
+  shape(k, C.amber); shape(k * 0.58, C.candle);
+}
+function drawCandle(cx, cy, energy, t, full) { // the signature: one candle, lit at both ends, shorter as energy goes
+  const h = 16, len = Math.max(0, full * energy / 100);
+  ctx.strokeStyle = 'rgba(243,233,210,0.28)'; ctx.lineWidth = 2; rr(cx - full / 2, cy - h / 2, full, h, 8); ctx.stroke();
+  if (len < 3) return;
+  const low = energy < tune.tired_below && Math.sin(t * 12) > 0;
+  ctx.fillStyle = low ? C.red : C.paper; rr(cx - len / 2, cy - h / 2, len, h, Math.min(8, len / 2)); ctx.fill();
+  ctx.fillStyle = 'rgba(27,34,56,0.18)'; ctx.fillRect(cx - len / 2 + 4, cy + 2, Math.max(0, len - 8), 4);
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 2;
+  line(cx - len / 2, cy, cx - len / 2 - 7, cy - 3); line(cx + len / 2, cy, cx + len / 2 + 7, cy - 3);
+  flame(cx - len / 2 - 8, cy - 2, -1, t, 0.9); flame(cx + len / 2 + 8, cy - 2, 1, t + 1.3, 0.9);
+}
+function drawBar(x, y, w, v, color, locked) {
+  ctx.fillStyle = 'rgba(243,233,210,0.16)'; rr(x, y - 9, w, 18, 9); ctx.fill();
+  if (locked) return;
+  const len = Math.max(0, w * v / 100);
+  if (len > 2) { ctx.fillStyle = v < 30 ? C.red : color; rr(x, y - 9, len, 18, Math.min(9, len / 2)); ctx.fill(); }
+}
+function drawPlayer(x, gy, s) { // a student: backpack, hoodie, a laptop held flat overhead to catch on
+  const f = s.face, swing = s.moving ? Math.sin(s.runPhase) * 13 : 0;
+  ctx.save(); ctx.translate(x, gy); ctx.lineCap = 'round';
+  if (s.dashT > 0) { ctx.strokeStyle = 'rgba(243,233,210,0.5)'; ctx.lineWidth = 4; for (let i = 0; i < 3; i++) line(-f * 34, -40 - i * 26, -f * (70 + i * 10), -40 - i * 26); }
+  ctx.strokeStyle = '#c4b99e'; ctx.lineWidth = 10; line(-8, -38, -8 + swing, -3); line(8, -38, 8 - swing, -3);
+  ctx.fillStyle = C.amber; rr(f > 0 ? -31 : 11, -84, 20, 38, 7); ctx.fill();          // backpack
+  ctx.fillStyle = s.energy < tune.tired_below ? '#c9c2b4' : C.paper; rr(-17, -88, 34, 56, 12); ctx.fill(); // hoodie
+  ctx.fillStyle = 'rgba(27,34,56,0.25)'; ctx.fillRect(-2, -78, 4, 30);                // zip
+  ctx.strokeStyle = C.paper; ctx.lineWidth = 8; line(-14, -80, -32, -128); line(14, -80, 32, -128); // arms up
+  ctx.fillStyle = C.paper; ctx.beginPath(); ctx.arc(0, -104, 15, 0, 7); ctx.fill();   // head
+  ctx.fillStyle = '#2b3357'; ctx.beginPath(); ctx.arc(0, -107, 15.5, Math.PI * 1.05, Math.PI * 1.95); ctx.closePath(); ctx.fill(); // hair
+  if (s.stunT > 0) { ctx.fillStyle = '#0e1020'; rr(f * 4 - 6, -108, 12, 18, 3); ctx.fill(); ctx.fillStyle = '#b97cff'; ctx.fillRect(f * 4 - 4, -105, 8, 12); }
+  else { ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(f * 6, -102, 2.4, 0, 7); ctx.fill(); }
+  ctx.fillStyle = C.teal; rr(-46, -138, 92, 10, 4); ctx.fill();                       // the laptop, held flat
+  ctx.fillStyle = '#2f8f86'; ctx.fillRect(-46 + (f > 0 ? 70 : 0), -146, 22, 9);       // its hinge end
+  ctx.restore();
+}
+const ITEM_DRAW = { // each drop has its own outline, drawn around (0,0), about 50 px across
+  hw() { // a notebook: spine, ruled lines, a folded corner
+    ctx.fillStyle = C.paper; rr(-20, -25, 40, 50, 4); ctx.fill();
+    ctx.fillStyle = C.amber; ctx.fillRect(-20, -25, 9, 50);
+    ctx.fillStyle = '#d8ccb0'; ctx.beginPath(); ctx.moveTo(20, 11); ctx.lineTo(20, 25); ctx.lineTo(6, 25); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#8a8fa8'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    line(-6, -13, 14, -13); line(-6, -3, 14, -3); line(-6, 7, 6, 7);
+  },
+  ticket() { // a work ticket: a wide card with a branch drawn on it
+    ctx.fillStyle = C.teal; rr(-27, -18, 54, 36, 7); ctx.fill();
+    ctx.fillStyle = '#0f3d3a'; ctx.fillRect(-27, -18, 54, 7);
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    line(-15, -4, -15, 10); ctx.beginPath(); ctx.moveTo(-15, 4); ctx.quadraticCurveTo(-4, 4, -3, -3); ctx.stroke();
+    ctx.fillStyle = C.paper; for (const p of [[-15, -4], [-15, 10], [-3, -4]]) { ctx.beginPath(); ctx.arc(p[0], p[1], 3.4, 0, 7); ctx.fill(); }
+    ctx.strokeStyle = C.paper; line(6, 2, 20, 2); line(6, 9, 15, 9);
+  },
+  alert(t) { // a siren: a dome on a base, rays when it flashes
+    const on = Math.sin(t * 16) > 0;
+    ctx.fillStyle = on ? '#ff7a7e' : C.red; ctx.beginPath(); ctx.arc(0, 4, 20, Math.PI, 0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#8f2a31'; rr(-25, 4, 50, 10, 3); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(-7, -4, 5, 0, 7); ctx.fill();
+    if (on) { ctx.strokeStyle = '#ffb3b5'; ctx.lineWidth = 3; ctx.lineCap = 'round'; line(0, -22, 0, -30); line(-18, -14, -25, -21); line(18, -14, 25, -21); }
+  },
+  trophy() { // a cup with two handles on a stem
+    ctx.fillStyle = C.candle; ctx.beginPath(); ctx.moveTo(-17, -24); ctx.lineTo(17, -24); ctx.quadraticCurveTo(16, 4, 0, 6); ctx.quadraticCurveTo(-16, 4, -17, -24); ctx.fill();
+    ctx.strokeStyle = C.candle; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(-18, -13, 8, Math.PI * 0.5, Math.PI * 1.5); ctx.stroke();
+    ctx.beginPath(); ctx.arc(18, -13, 8, Math.PI * 1.5, Math.PI * 0.5); ctx.stroke();
+    ctx.fillStyle = '#d9a93a'; ctx.fillRect(-3, 5, 6, 12); rr(-15, 16, 30, 8, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(-10, -19, 4, 14);
+  },
+  pillow() { // a puffed pillow with a moon on it
+    ctx.fillStyle = '#eef1ff'; ctx.beginPath(); ctx.moveTo(-28, -15); ctx.quadraticCurveTo(0, -22, 28, -15);
+    ctx.quadraticCurveTo(35, 0, 28, 15); ctx.quadraticCurveTo(0, 22, -28, 15); ctx.quadraticCurveTo(-35, 0, -28, -15); ctx.fill();
+    ctx.fillStyle = '#8f9ad6'; ctx.beginPath(); ctx.arc(0, 0, 9, 0, 7); ctx.fill();
+    ctx.fillStyle = '#eef1ff'; ctx.beginPath(); ctx.arc(4, -3, 8, 0, 7); ctx.fill();
+  },
+  phone() { // a phone, tall and dark, a video playing
+    ctx.fillStyle = '#0e1020'; rr(-16, -27, 32, 54, 6); ctx.fill();
+    ctx.strokeStyle = C.paper; ctx.lineWidth = 2; rr(-16, -27, 32, 54, 6); ctx.stroke();
+    ctx.fillStyle = '#b97cff'; rr(-12, -21, 24, 40, 3); ctx.fill();
+    ctx.fillStyle = C.paper; ctx.beginPath(); ctx.moveTo(-5, -9); ctx.lineTo(8, -1); ctx.lineTo(-5, 7); ctx.closePath(); ctx.fill();
+  },
+};
+function drawDoor(x, gy, d, plain) {
+  ctx.fillStyle = d.color; rr(x - 44, gy - 150, 88, 150, 10); ctx.fill();
+  ctx.fillStyle = C.ink; rr(x - 34, gy - 138, 68, 138, 6); ctx.fill();
+  ctx.fillStyle = 'rgba(255,214,107,0.9)'; ctx.beginPath(); ctx.arc(x + 20, gy - 66, 4.5, 0, 7); ctx.fill();
+  if (!plain || d) text(d.label, x, gy - 176, 28, d.color);
+}
+function drawWorld(hud) {
+  const s = state;
+  drawSky(); drawRoad(hud && s.phase === 'fall');
+  if (s.phase === 'doors') for (const d of DOORS) drawDoor(d.x, GROUND, d, false);
+  for (const it of s.items) {
+    ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(it.tilt); ITEM_DRAW[it.kind](s.t); ctx.restore();
+  }
+  drawPlayer(s.px, GROUND, s);
+  if (!hud) return;
+  for (const p of s.pops) { ctx.globalAlpha = clamp(1 - (p.t - 0.5) / 0.4, 0, 1); text(p.s, clamp(p.x, 90, W - 90), p.y, 26, p.c); ctx.globalAlpha = 1; }
+  // the HUD: the school bar on the school side, the internship bar on the work side, the candle between
+  text('学业', 36, 40, 24, C.amber, 'left'); drawBar(96, 40, 270, s.study, C.amber, false);
+  const locked = s.sem === 0;
+  text(locked ? '实习（还没开始）' : '实习', W - 36, 40, 24, locked ? C.dim : C.teal, 'right');
+  if (!locked) drawBar(W - 96 - 270, 40, 270, s.work, C.teal, false);
+  drawCandle(W / 2, 44, s.energy, s.t, 320);
+  text('分数 ' + s.score + (s.mult > 1 ? '　×' + s.mult : ''), 36, 84, 24, C.paper, 'left');
+  text('最高 ' + Math.max(s.best, s.score), W - 36, 84, 24, C.dim, 'right');
+  text((s.sem + 1) + '/5 ' + SEMS[s.sem].name, W / 2, 88, 24, C.paper);
+  if (s.bannerT > 0) {
+    ctx.globalAlpha = clamp(s.bannerT / 0.5, 0, 1);
+    if (s.phase === 'doors') { text('大三上结束了', W / 2, 250, 48, C.paper); text('走进一扇门', W / 2, 310, 28, C.dim); }
+    else { text(SEMS[s.sem].name + ' · ' + SEMS[s.sem].line, W / 2, 250, 48, C.paper); text(SEMS[s.sem].hint, W / 2, 310, 28, C.dim); }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  scenes[scene].update(STEP); hit.clear(); tapHit = false; wantPause = false;
+}
+let last, acc = 0, ALPHA = 1; // ALPHA: how far the frame is between the last two steps
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now; // a stall never fast-forwards the game
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+// A headless browser on a time budget runs timers but almost no animation frames: a timer
+// ticks when no frame has come for 100 ms on a visible page; a hidden tab stays paused.
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; }, // the loop steps; a check empties it
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+if (!scenes[scene]) scene = 'title';
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>

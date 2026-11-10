@@ -1,0 +1,39 @@
+name: small-check
+# Runs the template's own one-shot small check in a headless browser, so nothing is played on a
+# laptop. The evidence folder comes back as an artifact.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['prototypes/**', '.github/workflows/check.yml']
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fonts and browser sandbox
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Small check
+        run: |
+          set +e
+          G=prototypes/both-ends
+          bash .claude/scripts/one-shot-check.sh $G --keys "Enter wait:1 ArrowLeft:1.5 ArrowRight:2 Space wait:1"
+          echo "check exit: $?"
+          bash .claude/scripts/page-shot.sh $G/index.html $G/evidence/figures.png --query scene=figures
+          echo "figures exit: $?"
+          bash .claude/scripts/page-shot.sh $G/index.html $G/evidence/title.png
+          echo "title exit: $?"
+          bash .claude/scripts/one-shot-run.sh $G $G/evidence/play-long.png --log "Enter wait:2 ArrowLeft:2.5 ArrowRight:1.2 ArrowLeft:1.5 ArrowRight:1 ArrowLeft:1 ArrowRight:1.5 ArrowLeft:2 wait:1" > $G/evidence/play-long.tsv
+          echo "long run exit: $?"
+          cat $G/evidence/play-long.tsv | cut -c1-300
+          echo "---- checklist"
+          bash .claude/scripts/one-shot-check.sh $G --checklist
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: prototypes/both-ends/evidence
