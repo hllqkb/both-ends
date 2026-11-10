@@ -1,0 +1,32 @@
+time	2026-11-10 06:58:35
+keep	lines	0	pinned	0
+checklist	L1	unlisted	-	Look: 夜里的剪纸画。深靛蓝的夜空，左半边是暖色的宿舍楼和一棵树，右半边是冷色的写字楼，窗户一格一格亮着；地面是一条浅色的路。主角是个背书包、抱着笔记本电脑的小人，米白色，比背景亮。掉下来的每样东西轮廓都不一样：作业本、工单卡片、红色告警铃、奖杯、枕头、手机。配色：靛蓝（背景）、米白（主角和字）、琥珀（学校这头）、青绿（实习这头）、红（告警）、烛黄（精力）。招牌细节：屏幕顶上横着一根两头都有火苗的蜡烛，精力越少它越短。每个形象都是画出来的，不用 emoji，不用光秃秃的圆。 *(guessed)*	
+checklist	L2	unlisted	-	References: 没有指定参考游戏。	
+checklist	L3	unlisted	-	View: 2D · Camera: 固定单屏，整屏适配窗口。 *(provisional)*	
+checklist	F1	unlisted	-	左右移动和冲刺，按键当帧生效，接物判定比画面略宽、手机判定比画面略窄	
+checklist	F2	unlisted	-	六种掉落物，各有自己的轮廓和效果：作业本、工单、告警铃、奖杯、枕头、手机	
+checklist	F3	unlisted	-	学业条、实习条和两头烧的蜡烛，蜡烛低于四分之一时人变慢	
+checklist	F4	unlisted	-	五个学期一个比一个快，屏幕上显示当前学期，每学期开头有一行字说明多了什么	
+checklist	F5	unlisted	-	分数在接到的位置跳出来，连续接到涨倍数，倍数显示在分数旁边	
+checklist	F6	unlisted	-	最高分保存在本机，结算页说明有没有破纪录	
+checklist	F7	unlisted	-	通关时走进“续签”或“回学校”的门，各有一句结局	
+checklist	F8	unlisted	-	标题、暂停、失败、结算四个画面，声音可静音	
+checklist	M1	unlisted	-	标题页写着怎么操作，按回车开始。第一学期“大一上”只有左边掉作业本，掉得慢，我左右跑着接，每接到一本分数就在原地跳出来，连着接倍数往上涨。蜡烛一直在慢慢变短，中间飘下来一个枕头，接住蜡烛就长回来一截。大约二十五秒后屏幕中间出现“大一下 · 第一份实习”，右边开始掉工单，右上角多出一条实习条。这时第一次出现左边一本作业、右边一张工单同时落地的局面，我只能接一头，漏掉的那头条子掉一格：这就是这个游戏。	
+checklist	C1	unlisted	-	第一次真正的麻烦在第 50 到 80 秒，“大二上”：下落变快，天上开始掉手机，接到会愣住一秒多。到“大二下”红色告警铃出现，它比别的都快，漏掉一次实习条掉一大截。学业条、实习条任意一条见底，或者蜡烛烧完，这一局就结束，从大一上重来。最后一学期“大三上”最快最密，不放弃一些东西是撑不下来的。 *(provisional)*	
+browser	HeadlessChrome/156.0.0.0
+scene	play	0	title
+scene	play	1	play
+digits	log	24px "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif	tabular	0
+measure	step-time	play	0.202	73.100	372
+lane	play	stop	6.2	319
+uncaught	play	0
+text	play	canvas	63,684,157,708	36.0	9.02	inside	学校这头
+text	play	canvas	1123,684,1217,708	36.0	9.02	inside	公司这头
+text	play	canvas	37,28,83,52	36.0	8.69	inside	学业
+text	play	canvas	1053,28,1228,52	36.0	8.43	inside	实习（还没开始）
+text	play	canvas	37,72,102,96	36.0	14.26	inside	分数 0
+text	play	canvas	1178,72,1244,96	36.0	8.25	inside	最高 0
+text	play	canvas	585,76,696,102	36.0	14.24	inside	1/5 大一上
+screen	play	drawn
+shot	play	prototypes/both-ends/evidence/play.png
+responds	changed	64

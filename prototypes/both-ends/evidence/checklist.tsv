@@ -1,0 +1,13 @@
+L1	pass	evidence/figures.png	night cut-paper scene, dorm and tower, every figure drawn with its own outline, the two-ended candle on top (evidence/play.png)
+L2	pass	evidence/nearest-game.txt	no reference game was named; the nearest game and the difference are written down
+L3	pass	evidence/play.png	2D, one fixed screen fitted to the window
+F1	pass	index.html:274	runs on the step the key is down; catch width at index.html:302, the phone's narrower
+F2	pass	evidence/figures.png	six drops, six outlines; effects in onCatch and onMiss
+F3	pass	evidence/play.png	study bar, internship bar (locked in the first semester) and the candle; the slow-down at index.html:272
+F4	pass	index.html:295	semester counter on screen in evidence/play.png; speed and gap ramp at index.html:146; only the first semester was seen running
+F5	pass	index.html:169	popups where it was earned (a miss popup shows in evidence/play-long.png); multiplier at index.html:172
+F6	pass	index.html:210	best score written to localStorage and the end screens say when it is beaten; not seen across two visits
+F7	pass	evidence/figures.png	both doors drawn; walking into one ends the run at index.html:281; not reached in a run
+F8	pass	evidence/title.png	title seen; pause, over and results at index.html:315, 323, 337; mute at index.html:92
+M1	pass	evidence/play-long.png	the first 14 seconds seen: homework only on the left, a pillow drifting down, the candle shorter; the second semester's banner is at index.html:295 and was not reached
+C1	not_assessed	index.html:148	built (phones from the third semester, alerts from the fourth, three ways to lose) but no run got past the first semester, and the check plays no robot
